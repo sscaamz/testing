@@ -32,6 +32,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-18 lld-18 llvm-18 libelf-dev libssl-dev flex bison bc dwarves build-essential zstd cpio python3-zstandard libjemalloc2 kmod
+      - name: Add free ephemeral swap for FullLTO
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(df -B1 --output=avail / | tail -1)" -ge 42949672960
+          sudo fallocate -l 24G /swap-strawberry
+          sudo chmod 600 /swap-strawberry
+          sudo mkswap /swap-strawberry
+          sudo swapon /swap-strawberry
+          free -h | tee -a .strawberry-kit/logs/memory.txt
+          echo 'Standard free public runner; make -j4; LLD threads=1; 24 GiB extra ephemeral swap; no caches' | tee .strawberry-kit/logs/host-settings.txt
       - name: Recover private original firmware
         working-directory: .strawberry-kit
         env:
@@ -70,6 +81,8 @@ jobs:
           p=Path('scripts/report.py')
           p.write_text(p.read_text().replace('The original firmware is recovered from the checksum-verified public original kernel.', 'Eleven firmware blobs match the pinned source; the recovered twelfth is supplied via encrypted Actions secrets.'))
           PY
+          sed -i 's/-j2 bzImage modules/-j4 bzImage modules/' scripts/build.sh
+          sed -i 's/make -j2/make -j4; 24 GiB additional ephemeral swap/' scripts/report.py
           bash scripts/build.sh 2>&1 | tee logs/build-console.log
       - name: Upload successful binaries
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
