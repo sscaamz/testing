@@ -32,11 +32,44 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-18 lld-18 llvm-18 libelf-dev libssl-dev flex bison bc dwarves build-essential zstd cpio python3-zstandard libjemalloc2 kmod
+      - name: Recover private original firmware
+        working-directory: .strawberry-kit
+        env:
+          STRAWBERRY_FW_01: ${{ secrets.STRAWBERRY_FW_01 }}
+          STRAWBERRY_FW_02: ${{ secrets.STRAWBERRY_FW_02 }}
+          STRAWBERRY_FW_03: ${{ secrets.STRAWBERRY_FW_03 }}
+          STRAWBERRY_FW_04: ${{ secrets.STRAWBERRY_FW_04 }}
+          STRAWBERRY_FW_05: ${{ secrets.STRAWBERRY_FW_05 }}
+          STRAWBERRY_FW_06: ${{ secrets.STRAWBERRY_FW_06 }}
+          STRAWBERRY_FW_07: ${{ secrets.STRAWBERRY_FW_07 }}
+          STRAWBERRY_FW_08: ${{ secrets.STRAWBERRY_FW_08 }}
+          STRAWBERRY_FW_09: ${{ secrets.STRAWBERRY_FW_09 }}
+          STRAWBERRY_FW_10: ${{ secrets.STRAWBERRY_FW_10 }}
+        shell: bash
+        run: |
+          /usr/bin/python3 - <<'PY'
+          import os,base64,gzip,hashlib
+          from pathlib import Path
+          encoded=''.join(os.environ['STRAWBERRY_FW_'+str(i).zfill(2)] for i in range(1,11))
+          data=gzip.decompress(base64.b64decode(encoded,validate=True))
+          assert len(data)==452764 and hashlib.sha256(data).hexdigest()=='c5b84ce8f70072f9f11173f448d574655ff2506595cb8dc113f6d8110272ad66'
+          Path('work').mkdir(exist_ok=True)
+          p=Path('work/private-sd8797.bin');p.write_bytes(data);p.chmod(0o600)
+          print('Private original firmware reconstructed and SHA-256 verified')
+          PY
       - name: Build and verify kernel and module
         working-directory: .strawberry-kit
         shell: bash
         run: |
           set -euo pipefail
+          /usr/bin/python3 - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/build.sh')
+          p.write_text('\n'.join(l for l in p.read_text().splitlines() if not l.startswith('curl --fail') and not l.startswith("echo '0721138983"))+'\n')
+          Path('scripts/prepare.py').write_text("from pathlib import Path\nimport hashlib,json,subprocess,shutil\nmanifest=json.loads(Path('inputs/firmware-manifest.json').read_text())\nassert hashlib.sha256(Path('inputs/original.config').read_bytes()).hexdigest()=='a159bc5a3384d45e30da261c8806e7f631e011fdc5abf90a69d5b3f5fcc8a4f2'\nfor item in manifest:\n    name=item['name']\n    source=Path('work/private-sd8797.bin') if name=='mrvl/sd8797_uapsta.bin' else Path('work/linux/extra_firmware')/name\n    data=source.read_bytes()\n    assert len(data)==item['size'] and hashlib.sha256(data).hexdigest()==item['sha256'], 'Firmware hash mismatch: '+name\n    target=Path('work/original-firmware')/name\n    target.parent.mkdir(parents=True,exist_ok=True)\n    target.write_bytes(data)\ndestination='/home/runner/work/linux/linux/kernel-source-host/extra_firmware'\nsubprocess.run(['sudo','mkdir','-p',destination],check=True)\nsubprocess.run(['sudo','cp','-a','work/original-firmware/.',destination+'/'],check=True)\nPath('logs/firmware-input-verification.json').write_text(json.dumps(manifest,indent=2)+'\\n')\nprint('All 12 original firmware inputs verified by length and SHA-256')\n")
+          p=Path('scripts/report.py')
+          p.write_text(p.read_text().replace('The original firmware is recovered from the checksum-verified public original kernel.', 'Eleven firmware blobs match the pinned source; the recovered twelfth is supplied via encrypted Actions secrets.'))
+          PY
           bash scripts/build.sh 2>&1 | tee logs/build-console.log
       - name: Upload successful binaries
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
