@@ -1,0 +1,55 @@
+name: Strawberry FullLTO V4L2
+on:
+  push:
+    branches: [strawberry-v4l2-exp1]
+    paths: [.github/workflows/strawberry-v4l2.yml, strawberry-actions-kit.zip]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: strawberry-v4l2-exp1
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'sscaamz/testing' && !github.event.repository.private
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify reviewed kit and runner resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '500c17b9dd520ecdf422b4640f4f5ae5dd6dc4b0de1c7b69be78376e85ef4ced  strawberry-actions-kit.zip' | sha256sum --check
+          unzip -q strawberry-actions-kit.zip -d .strawberry-kit
+          mkdir -p .strawberry-kit/logs .strawberry-kit/dist
+          free -h | tee .strawberry-kit/logs/memory.txt
+          df -h | tee .strawberry-kit/logs/disk.txt
+          test "$(awk '/MemTotal:/ {print $2}' /proc/meminfo)" -ge 14000000
+      - name: Install build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 lld-18 llvm-18 libelf-dev libssl-dev flex bison bc dwarves build-essential zstd cpio python3-zstandard libjemalloc2 kmod
+      - name: Build and verify kernel and module
+        working-directory: .strawberry-kit
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/build.sh 2>&1 | tee logs/build-console.log
+      - name: Upload successful binaries
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: strawberry-v4l2-exp1
+          path: .strawberry-kit/dist/strawberry-v4l2-exp1.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - name: Upload diagnostic logs on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: strawberry-build-failure-logs
+          path: .strawberry-kit/logs/
+          retention-days: 1
